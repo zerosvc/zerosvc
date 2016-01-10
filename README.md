@@ -114,8 +114,8 @@ Transport **can** add keys on receive but they **must** be contained under `_tra
 
 #### required keys
 
-* `node-name` - 1-256 byte UTF-8 node name. Human readable, preferably in fqdn-appname form
-* `node-uuid` - 32 byte node UUID
+* `node-name` - 1-256 byte UTF-8 node name. Human readable, preferably in `fqdn@appname:instance` form
+* `node-uuid` - 32 byte node UUID - in case of persistent nodes it should be generated at first start and saved, especially if your application stores data with node
 * `ts` - unixtime, can be s/ms/us accuracy e.g `123456.001`
 * `sha256` - checksum of data part
 
