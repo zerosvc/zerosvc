@@ -26,9 +26,8 @@ func Run(catalogState *catalog.State) {
 	cfg.catalogState = catalogState
 	cfg.staticHandler = http.FileServer(http.Dir(cfg.StaticDir))
 	goji.Get("/status", status)
-	goji.Get("/tpl",cfg.Index)
-	goji.Get("/index.html", http.FileServer(http.Dir(cfg.StaticDir)))
 	goji.Get("/:file", cfg.Serve)
+	goji.Get("/", cfg.Serve)
 	goji.Get("/*", http.FileServer(http.Dir(cfg.StaticDir)))
 	goji.Serve()
 }
@@ -46,12 +45,20 @@ func (cfg *Webapp) Index(c web.C, w http.ResponseWriter, r *http.Request) {
 
 
 func (cfg *Webapp) Serve(c web.C, w http.ResponseWriter, r *http.Request) {
-	t, err := template.ParseGlob("template/" + c.URLParams["file"] + "*")
-	if (err != nil) {
-		log.Error("tpl parse failed: %s", err)
+	// do not use it in anything close to production, proper version should load templates first and then just match path
+	tpl, err := template.ParseGlob("template/*")
+	if err != nil {
+		log.Error("error parsing template:", err)
+		return
+	}
+	tplName := c.URLParams["file"]
+	if tplName == "" {
+		tplName = "index"
+	}
+
+	if tpl.Lookup(tplName) == nil  {
 		cfg.staticHandler.ServeHTTP(w,r)
 		return
 	}
-	t.Execute(w, cfg.catalogState)
-
+	tpl.ExecuteTemplate(w, tplName, cfg.catalogState)
 }
