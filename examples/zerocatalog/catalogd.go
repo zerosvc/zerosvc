@@ -8,6 +8,7 @@ import (
 	"github.com/zerosvc/zerosvc/examples/zerocatalog/webapp"
 	"os"
 	"strings"
+	"time"
 )
 
 var version string
@@ -33,7 +34,6 @@ func main() {
 	if len(os.Getenv("AMQP_URL")) > 0 {
 		cfg.AmqpAddr = os.Getenv("AMQP_URL")
 	}
-
 	log.Info("Starting app")
 	log.Debug("version: %s", version)
 	if !strings.ContainsRune(version, '-') {
@@ -64,6 +64,12 @@ func main() {
 
 		for ev := range evCh {
 			log.Noticef("got %+v", ev)
+		}
+	}()
+	go func() {
+		for {
+			catalogState.Node.SendEvent("discovery.catalog", catalogState.Node.NewHeartbeat())
+			time.Sleep(3 * time.Second)
 		}
 	}()
 
