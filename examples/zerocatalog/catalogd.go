@@ -2,12 +2,12 @@ package main
 
 import (
 	//	"fmt"
-	"catalog"
 	"github.com/op/go-logging"
 	"github.com/zerosvc/go-zerosvc"
+	"github.com/zerosvc/zerosvc/examples/zerocatalog/catalog"
+	"github.com/zerosvc/zerosvc/examples/zerocatalog/webapp"
 	"os"
 	"strings"
-	"webapp"
 )
 
 var version string
@@ -30,6 +30,9 @@ func main() {
 	stderrFormatter := logging.NewBackendFormatter(stderrBackend, stdout_log_format)
 	logging.SetBackend(stderrFormatter)
 	logging.SetFormatter(stdout_log_format)
+	if len(os.Getenv("AMQP_URL")) > 0 {
+		cfg.AmqpAddr = os.Getenv("AMQP_URL")
+	}
 
 	log.Info("Starting app")
 	log.Debug("version: %s", version)
@@ -43,6 +46,26 @@ func main() {
 	}
 	var catalogState catalog.State
 	catalogState.Node = zerosvc.NewNode(hostname + "@catalog")
+	transportConfig := zerosvc.TransportAMQPConfig{
+		Heartbeat: 3,
+	}
+	tr := zerosvc.NewTransport(zerosvc.TransportAMQP, cfg.AmqpAddr, transportConfig)
+	connErr := tr.Connect()
+	if connErr != nil {
+		log.Panicf("Can't connect to AMQP: %s", connErr)
+	}
+	catalogState.Node.SetTransport(tr)
+	go func() {
+		evCh, err := catalogState.Node.GetEventsCh("discovery.#")
+		if err != nil {
+			log.Errorf("Can't get events: %s", err)
+			return
+		}
+
+		for ev := range evCh {
+			log.Noticef("got %+v", ev)
+		}
+	}()
 
 	webapp.Run(&catalogState)
 }

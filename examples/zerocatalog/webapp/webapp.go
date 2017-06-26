@@ -6,7 +6,7 @@ import (
 	"github.com/zenazn/goji/web"
 	"net/http"
 	"fmt"
-	"catalog"
+	"github.com/zerosvc/zerosvc/examples/zerocatalog/catalog"
 	"html/template"
 )
 
