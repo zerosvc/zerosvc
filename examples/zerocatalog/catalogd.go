@@ -2,76 +2,57 @@ package main
 
 import (
 	//	"fmt"
-	"github.com/op/go-logging"
+	"github.com/urfave/cli"
 	"github.com/zerosvc/go-zerosvc"
 	"github.com/zerosvc/zerosvc/examples/zerocatalog/catalog"
 	"github.com/zerosvc/zerosvc/examples/zerocatalog/webapp"
+	"log"
 	"os"
-	"strings"
-	"time"
 )
 
 var version string
-var log = logging.MustGetLogger("main")
-var stdout_log_format = logging.MustStringFormatter("%{color:bold}%{time:2006-01-02T15:04:05.9999Z-07:00}%{color:reset}%{color} [%{level:.1s}] %{color:reset}%{shortpkg}[%{longfunc}] %{message}")
-var static_dir = "public"
-
-type config struct {
-	StaticDir string
-	AmqpAddr  string
-}
-
-var cfg = config{
-	StaticDir: "public",
-	AmqpAddr:  "amqp://guest:guest@localhost:5672",
-}
 
 func main() {
-	stderrBackend := logging.NewLogBackend(os.Stderr, "", 0)
-	stderrFormatter := logging.NewBackendFormatter(stderrBackend, stdout_log_format)
-	logging.SetBackend(stderrFormatter)
-	logging.SetFormatter(stdout_log_format)
-	if len(os.Getenv("AMQP_URL")) > 0 {
-		cfg.AmqpAddr = os.Getenv("AMQP_URL")
+	app := cli.NewApp()
+	app.Name = "zerocatalog"
+	app.Description = "example catalog browser"
+	app.Version = version
+	app.HideHelp = true
+	app.Flags = []cli.Flag{
+		cli.BoolFlag{Name: "help, h", Usage: "show help"},
+		cli.StringFlag{
+			Name:  "mqtt-url",
+			Usage: "URL for the MQ server. Use tls:// to enable encryption (default: tcp://mqtt:mqtt@127.0.0.1:1883)",
+			Value: "tcp://127.0.0.1:1883",
+		},
 	}
-	log.Info("Starting app")
-	log.Debug("version: %s", version)
-	if !strings.ContainsRune(version, '-') {
-		log.Warning("once you tag your commit with name your version number will be prettier")
-	}
-	log.Error("now add some code!")
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Error("hostname resolution failed:", err)
-	}
-	var catalogState catalog.State
-	catalogState.Node = zerosvc.NewNode(hostname + "@catalog")
-	transportConfig := zerosvc.TransportAMQPConfig{
-		Heartbeat: 3,
-	}
-	tr := zerosvc.NewTransport(zerosvc.TransportAMQP, cfg.AmqpAddr, transportConfig)
-	connErr := tr.Connect()
-	if connErr != nil {
-		log.Panicf("Can't connect to AMQP: %s", connErr)
-	}
-	catalogState.Node.SetTransport(tr)
-	go func() {
-		evCh, err := catalogState.Node.GetEventsCh("discovery.#")
-		if err != nil {
-			log.Errorf("Can't get events: %s", err)
-			return
+	app.Action = func(c *cli.Context) error {
+		var catalogState catalog.State
+		nodename := zerosvc.GetFQDN() + "@catalog"
+		catalogState.Node = zerosvc.NewNode(nodename)
+		tr := zerosvc.NewTransport(
+			zerosvc.TransportMQTT,
+			c.GlobalString("mqtt-url"),
+			zerosvc.TransportMQTTConfig{},
+		)
+		connErr := tr.Connect()
+		if connErr != nil {
+			log.Panicf("Can't connect to MQTT: %s", connErr)
 		}
+		catalogState.Node.SetTransport(tr)
+		go func() {
+			evCh, err := catalogState.Node.GetEventsCh("discovery/#")
+			if err != nil {
+				log.Printf("Can't get events: %s", err)
+				return
+			}
 
-		for ev := range evCh {
-			log.Noticef("got %+v", ev)
-		}
-	}()
-	go func() {
-		for {
-			catalogState.Node.SendEvent("discovery.catalog", catalogState.Node.NewHeartbeat())
-			time.Sleep(3 * time.Second)
-		}
-	}()
-
-	webapp.Run(&catalogState)
+			for ev := range evCh {
+				log.Printf("got %+v", ev)
+			}
+		}()
+		webapp.Run(&catalogState)
+		return nil
+	}
+	app.Run(os.Args)
 }

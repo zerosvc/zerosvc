@@ -9,6 +9,10 @@ Queue-oriented (AMQP for now, ZMQ someday) service/RPC/event framework
 
 ## Concepts
 
+### Paths
+
+Paths are in `/` - separated format. 
+
 ### Services
 #### Service providers
 
@@ -16,19 +20,25 @@ Queue-oriented (AMQP for now, ZMQ someday) service/RPC/event framework
 
 Service providers provide service to components of the system.
 
-Service provider **have** to ACK or NACK task if client sends appropriate header. Client does not have to be receiver of that, eg. client can send a task to service provider but tell SP to send confirmation to logging service
+Service provider **have** to ACK or NACK task if client sends appropriate (mapped to "reply to" in the transports that support it)
+If SP generates output it will send it to path provided in request. 
+If request does not provide necessary information (e.g. invalid request) it **must** NAK it. 
+If client wants to discard output it **must** not provide "reply to"
+Service **may** send more than one message to ReplyTo header (e.g. start and end of a job)
 
-If SP generates  output it will send it to path provided in request. If request does not provide neccesary header it **must** NAK it. If client wants to discard output it **must** provide discard target in header.
-
-SP have **name** and optional one or more instances and sub-instances, separated by dot, e.g. notification service could have name `notify` and instances `notify.xmpp`, `notify.email`, `notify.sms`, with sub instances `notify.sms.prio` and `notify.sms.bulk`
+SP have **name** and optional one or more instances and sub-instances, separated by dot, 
+e.g. notification service could have name `notify` and instances `notify/xmpp`, `notify/email`, `notify/sms`, 
+with sub instances `notify/sms/prio` and `notify/sms/bulk`.
 
 #### Instances
 
 Instances are for dividing services of same type into logical instances.
 
-For example service.nmap might be divided into service.nmap.dc1 and service.nmap.dc2 to give client ability to choose a location without sending request to specific node
+For example `service/nmap` might be divided into `service/nmap/dc1` and `service/nmap/dc2` to give client ability to choose a location without sending request to specific node
 
-Or job manager could have `service.jobs.bulk` and `service.jobs.important` to divide work between slower and faster workers
+Or job manager could have `service/jobs/bulk` and `service/jobs/important` to divide work between slower and faster workers
+
+Note that how that works depends on transport. MQTTv3 does not have support for shared subscriptions
 
 It can be also used to separate resources of different projects and then futher subdivide it inside a given project for example multiple projects with multiple varnish cache pools: `service.cache-invalidator.project1.varnish-gfx`, `service.cache-invalidator.project2.varnish-mm`
 
@@ -89,12 +99,14 @@ So for example if we need to address 6 clusters of service distibuted into 2 DCs
 
 each dotted part of routing key can be filtered using 2 filters:
 
-* `*`(star) - means "substiture one word"
+* `+`(plus) - means "substiture one word"
 * `#` (hash) - means "substitute more than one word"
 
-so `service.img.*.png` will match `service.img.crop.png` but not `service.img.png` or `service.img.dc1.crop.png`
+Transport should translate that mapping to native
 
-and `service.#.png` will match all of those
+so `service/img/+/png` will match `service/img/crop/png` but not `service/img/png` or `service/img/dc1/crop/png`
+
+and `service/#/png` will match all of those
 
 #### Routing
 
@@ -108,9 +120,33 @@ Minimum header size is 64KiB of json-encoded data (even if underlying transport 
 
 It should be encoded on transport level (so client only passes a hash of data).
 
-Transport **may** add new headers but **must not** modify passed ones. If transport need thos headers for it's own use it should prefix received headers on send, and remove that prefix on receive.
+Transport **may** add new headers but **must not** modify passed ones. If transport need those headers for it's own use it should prefix received headers on send, and remove that prefix on receive.
 
 Transport **can** add keys on receive but they **must** be contained under `_transport-` prefix
+
+### Signatures
+
+Header for containing signatures is **must** be called `_sec-sig`. 
+
+#### Binary format
+
+| byte | format  | usage  |
+| --- | ---  |  --- |
+| 0 | uint8 | type |
+| 1 | uint8 | length of signature |
+| 2.. | 1-255 bytes|  |
+
+#### Encoding
+
+Sig block should be encoded in base64 
+
+#### Signature types
+
+| ID | name    | description |
+| -- | ---     | ---         |
+| 0  | invalid | invalid type |
+| 1  | Ed25519 | raw Ed25519 signature |
+| 2  | X509    | X509  CA-based sig |
 
 #### required keys
 
@@ -134,11 +170,13 @@ Minmum size of body transport **must** transfer is 4MiB
 
 ### Discovery
 
-Persistent nodes should send a message describing service every $heartbeat interval; it should be send to `discovery.node.$nodename` ; body should contain json-encoded:
+Persistent nodes should send a message describing service every $heartbeat interval; it should be send to `discovery/node.$nodename` ; body should contain json-encoded:
 
 * `node-name`
 * `node-uuid`
-* `ts` -  in unixtime, optinally with ms/us part after dot (1421701103.134 for ms accuracy)
+* `node-info` - key-value map with node info
+* `node-pubkey` - node's signing pubkey if any. Encoded in same way as signature with first byte being type, second being length, third being key, all encoded in base64
+* `ts` -  RFC3399 or unixtime (plain or float for sub-ms accuracy if needed) timestamp
 * `hb-interval` - configured interval between heartbeats. Max 120s.
 * `ttl` - time after node should be considered inactive if it didn't send hb. should be 3x hb-interval
 * `services` - hash of services node is providing and their relevant info; same as in discovery.service

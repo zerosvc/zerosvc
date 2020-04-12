@@ -1,7 +1,0 @@
-package: github.com/zerosvc/zerosvc/examples/zerocatalog
-import:
-- package: github.com/op/go-logging
-- package: github.com/zenazn/goji
-  subpackages:
-  - web
-- package: github.com/zerosvc/go-zerosvc

@@ -15,6 +15,7 @@ type Webapp struct {
 	TemplateDir string
 	catalogState *catalog.State
 	staticHandler http.Handler
+	templateHandler *template.Template
 }
 
 var cfg = Webapp {
@@ -22,8 +23,17 @@ var cfg = Webapp {
 	TemplateDir: "template",
 }
 var log = logging.MustGetLogger("main")
+
 func Run(catalogState *catalog.State) {
+
 	cfg.catalogState = catalogState
+	tpl, err := template.ParseGlob("template/*")
+	if err != nil {
+		log.Error("error parsing template:", err)
+		return
+	}
+	cfg.templateHandler = tpl
+
 	cfg.staticHandler = http.FileServer(http.Dir(cfg.StaticDir))
 	goji.Get("/status", status)
 	goji.Get("/:file", cfg.Serve)
@@ -46,19 +56,15 @@ func (cfg *Webapp) Index(c web.C, w http.ResponseWriter, r *http.Request) {
 
 func (cfg *Webapp) Serve(c web.C, w http.ResponseWriter, r *http.Request) {
 	// do not use it in anything close to production, proper version should load templates first and then just match path
-	tpl, err := template.ParseGlob("template/*")
-	if err != nil {
-		log.Error("error parsing template:", err)
-		return
-	}
+
 	tplName := c.URLParams["file"]
 	if tplName == "" {
 		tplName = "index"
 	}
 
-	if tpl.Lookup(tplName) == nil  {
+	if cfg.templateHandler.Lookup(tplName) == nil  {
 		cfg.staticHandler.ServeHTTP(w,r)
 		return
 	}
-	tpl.ExecuteTemplate(w, tplName, cfg.catalogState)
+	cfg.templateHandler.ExecuteTemplate(w, tplName, cfg.catalogState)
 }
